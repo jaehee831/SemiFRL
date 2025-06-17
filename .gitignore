@@ -1,0 +1,27 @@
+# Python 컴파일된 파일 및 폴더 무시
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+.Python/
+
+# Jupyter Notebook 체크포인트 폴더 무시
+.ipynb_checkpoints/
+
+/src/analysis/
+/src/data/
+/src/DB/
+/src/notebook/
+/src/output/
+
+# IDE 및 운영체제 관련 파일 무시 (선택 사항)
+.vscode/       # VS Code 설정
+.idea/         # IntelliJ / PyCharm 설정
+.DS_Store      # macOS 특정 파일
+Thumbs.db      # Windows 썸네일 캐시
+
+# 로그 파일, 데이터 파일 등 (프로젝트에 따라 추가)
+*.log
+*.sqlite3
+/DB/          
+/output/
