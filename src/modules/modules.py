@@ -560,6 +560,7 @@ class RLAgent:
         self.epsilon_start = 1.0
         self.epsilon_end = 0.1
         self.epsilon_decay = 100
+        self.window_size = 5 # added 
         # ServerAgentDQN 초기화
         self.agent = ServerAgentDQN(state_dim, num_clients, device)
         self.current_round = 0
@@ -584,7 +585,7 @@ class RLAgent:
 
         for cid in range(self.num_clients):
             cursor.execute('''
-                SELECT participant_frequency, local_loss, local_msp, lm_ld_client_labels, lm_ld_client_output_logit
+                SELECT participant_frequency, local_msp, lm_ld_client_labels, lm_ld_client_output_logit
                 FROM fed_rl_data
                 WHERE client_number = ?
                 ORDER BY round DESC
@@ -593,9 +594,9 @@ class RLAgent:
             result = cursor.fetchone()
             
             if result is not None:
-                pfreq, loss, msp, client_labels, client_output_logit = result
+                pfreq, msp, client_labels, client_output_logit = result
                 state['participant_frequency'].append(pfreq/80.0)
-                state['client_loss'].append(loss)
+                # state['client_loss'].append(loss)
                 state['client_msp'].append(msp)
                 if client_labels is not None:
                     try:
@@ -608,19 +609,44 @@ class RLAgent:
                 if client_output_logit is not None:
                     try:
                         logits = ast.literal_eval(client_output_logit)
-                        p = utils.softmax(logits)
-                        N = len(p)
+                        logits = np.array(logits, dtype=np.float32)
+                        if logits.ndim == 1:
+                            logits = logits[None, :]  # (1, num_classes)
+                        p = utils.softmax(logits)    # shape: (num_samples, num_classes)
+                        N = p.shape[-1]
                         uniform = np.ones(N) / N
-                        kl_divergence = np.sum([pi * np.log((pi + 1e-8)/(ui + 1e-8)) for pi, ui in zip(p, uniform) if pi > 0])
+                        # 각 샘플별 KL, 평균값 사용
+                        kld_list = []
+                        for pi in p:
+                            kld = np.sum([pij * np.log((pij + 1e-8)/(ui + 1e-8)) for pij, ui in zip(pi, uniform) if pij > 0])
+                            kld_list.append(kld)
+                        kl_divergence = float(np.mean(kld_list))
                     except Exception:
                         kl_divergence = 0.0
                     state['kld_softmax'].append(kl_divergence)
             else:
                 state['participant_frequency'].append(0.0)
-                state['client_loss'].append(0.0)
+                # state['client_loss'].append(0.0)
                 state['client_msp'].append(0.8)
                 state['data_size'].append(0.0)
                 state['kld_softmax'].append(0.0)
+
+            cursor.execute('''
+                SELECT local_loss
+                FROM fed_rl_data
+                WHERE client_number = ?
+                ORDER BY round DESC
+                LIMIT ?
+            ''', (cid, self.window_size))
+
+            loss_results = cursor.fetchall()
+            loss_history = [float(loss[0]) for loss in loss_results]
+            
+            # window_size만큼 채우기
+            while len(loss_history) < self.window_size:
+                loss_history.append(0.0)
+                
+            state['client_loss'].append(loss_history)
             
         conn.close()
         
@@ -628,12 +654,13 @@ class RLAgent:
         state_array = np.array([
             state['round'],
             *state['participant_frequency'],
-            *state['client_loss'],
+            *[loss for loss_history in state['client_loss'] for loss in loss_history],  # flatten
             *state['client_msp'],
             *state['data_size'],
             *state['kld_softmax']
         ], dtype=np.float32)
-        
+
+        print("state_dim:", len(state_array))
         return state_array
 
     def select_clients(self, state, num_active_clients):
