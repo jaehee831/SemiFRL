@@ -35,8 +35,8 @@ def main():
         model_tag_list = [str(seeds[i]), cfg['data_name'], cfg['model_name'], cfg['control_name']]
         cfg['model_tag'] = '_'.join([x for x in model_tag_list if x])
         cfg['model_tag'] +='_rl'
-        cfg['client_db_path'] = f"DB/exp10_{cfg['model_tag']}_client.db"
-        cfg['server_db_path'] = f"DB/exp10_{cfg['model_tag']}_server.db"
+        cfg['client_db_path'] = f"DB/exp14_{cfg['model_tag']}_client.db"
+        cfg['server_db_path'] = f"DB/exp14_{cfg['model_tag']}_server.db"
         create_train_database(db_name=cfg['client_db_path'])
         create_test_database(db_name=cfg['server_db_path'])
         print('Experiment: {}'.format(cfg['model_tag']))
@@ -170,7 +170,8 @@ def runExperiment():
 
         
 def make_server(model):
-    state_dim = 1 + cfg['num_clients'] * 5
+    window_size = 5
+    state_dim = 1 + cfg['num_clients'] * (1 + window_size + 1 + 1 + 1)
     server = Server(model)
     server.agent = RLAgent(cfg['num_clients'], state_dim, cfg['device'])  
     return server
