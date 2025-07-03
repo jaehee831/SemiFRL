@@ -81,7 +81,7 @@ class Server:
                     global_optimizer.load_state_dict(self.global_optimizer_state_dict)
                     global_optimizer.zero_grad()
                     weight = torch.ones(len(valid_client))
-                    weight = weight / weight.sum()
+                    weight = weight / weight.sum() 
                     for k, v in model.named_parameters():
                         parameter_type = k.split('.')[-1]
                         if 'weight' in parameter_type or 'bias' in parameter_type:
@@ -553,13 +553,14 @@ def save_optimizer_state_dict(optimizer_state_dict):
     return optimizer_state_dict_
 
 class RLAgent:
-    def __init__(self, num_clients, state_dim, device='cuda'):
+    def __init__(self, num_clients, state_dim, window_size, device='cuda'):
         self.num_clients = num_clients
         self.device = device
         self.state_dim = state_dim
         self.epsilon_start = 1.0
         self.epsilon_end = 0.1
         self.epsilon_decay = 100
+        self.window_size = window_size 
         # ServerAgentDQN 초기화
         self.agent = ServerAgentDQN(state_dim, num_clients, device)
         self.current_round = 0
@@ -584,7 +585,7 @@ class RLAgent:
 
         for cid in range(self.num_clients):
             cursor.execute('''
-                SELECT participant_frequency, local_loss, local_msp, lm_ld_client_labels, lm_ld_client_output_logit
+                SELECT participant_frequency, local_msp, lm_ld_client_labels, lm_ld_client_output_logit
                 FROM fed_rl_data
                 WHERE client_number = ?
                 ORDER BY round DESC
@@ -593,9 +594,9 @@ class RLAgent:
             result = cursor.fetchone()
             
             if result is not None:
-                pfreq, loss, msp, client_labels, client_output_logit = result
+                pfreq, msp, client_labels, client_output_logit = result
                 state['participant_frequency'].append(pfreq/80.0)
-                state['client_loss'].append(loss)
+                # state['client_loss'].append(loss)
                 state['client_msp'].append(msp)
                 if client_labels is not None:
                     try:
@@ -617,10 +618,27 @@ class RLAgent:
                     state['kld_softmax'].append(kl_divergence)
             else:
                 state['participant_frequency'].append(0.0)
-                state['client_loss'].append(0.0)
+                # state['client_loss'].append(0.0)
                 state['client_msp'].append(0.8)
                 state['data_size'].append(0.0)
                 state['kld_softmax'].append(0.0)
+
+            cursor.execute('''
+                SELECT local_loss
+                FROM fed_rl_data
+                WHERE client_number = ?
+                ORDER BY round DESC
+                LIMIT ?
+            ''', (cid, self.window_size))
+
+            loss_results = cursor.fetchall()
+            loss_history = [float(loss[0]) for loss in loss_results]
+            
+            # window_size만큼 채우기
+            while len(loss_history) < self.window_size:
+                loss_history.append(0.0)
+                
+            state['client_loss'].append(loss_history)
             
         conn.close()
         
@@ -628,11 +646,13 @@ class RLAgent:
         state_array = np.array([
             state['round'],
             *state['participant_frequency'],
-            *state['client_loss'],
+            *[loss for loss_history in state['client_loss'] for loss in loss_history],  # flatten
             *state['client_msp'],
             *state['data_size'],
             *state['kld_softmax']
         ], dtype=np.float32)
+        
+        print("state_dim:", len(state_array))
         
         return state_array
 
@@ -646,12 +666,12 @@ class RLAgent:
             with torch.no_grad():
                 state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
                 q_values = self.agent.policy_net(state_tensor)
-                print(f"[RLAgent][Epsilon-Greedy] Q값 벡터: {q_values.cpu().numpy().flatten()}")
+                # print(f"[RLAgent][Epsilon-Greedy] Q값 벡터: {q_values.cpu().numpy().flatten()}")
                 selected = torch.topk(q_values, num_active_clients)[1].squeeze().cpu().numpy().tolist()
-                print(f"[RLAgent][Epsilon-Greedy] Q값 기반 선택 (epsilon: {eps_threshold:.3f}) → {selected}")
+                # print(f"[RLAgent][Epsilon-Greedy] Q값 기반 선택 (epsilon: {eps_threshold:.3f}) → {selected}")
         return selected
 
-    def update_Q_table(self, current_state, client_ids, client_loss_now, server_loss_now, next_state, done=False):
+    def update_dqn(self, current_state, client_ids, client_loss_now, server_loss_now, next_state, done=False): # 함수 명명 다시 
         rewards = []
         if client_loss_now and server_loss_now:
             for l_now, s_now in zip(client_loss_now, server_loss_now):

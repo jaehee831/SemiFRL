@@ -140,11 +140,13 @@ def runExperiment():
 
         # 1. 현재 상태 재구성
         current_state = server.agent.build_state(client, epoch)
+        # print(f"[연합학습] 현재 상태: {current_state}")
         # 2. 다음 상태 구성
         next_state = server.agent.build_state(client, epoch + 1)
+        # print(f"[연합학습] 다음 상태: {next_state}")
         
         is_last_round = (epoch == cfg['global']['num_epochs'])
-        server.agent.update_Q_table(
+        server.agent.update_dqn(
             current_state=current_state,
             client_ids=server.agent.selected_client_id_list,
             client_loss_now=client_loss_now,
@@ -170,9 +172,10 @@ def runExperiment():
 
         
 def make_server(model):
-    state_dim = 1 + cfg['num_clients'] * 5
+    window_size = 3  # RLAgent에서 사용하는 window_size와 동일하게!
+    state_dim = 1 + cfg['num_clients'] * (1 + window_size + 1 + 1 + 1)  # round + client별 state
     server = Server(model)
-    server.agent = RLAgent(cfg['num_clients'], state_dim, cfg['device'])  
+    server.agent = RLAgent(cfg['num_clients'], state_dim, window_size, cfg['device'])  
     return server
 
 
