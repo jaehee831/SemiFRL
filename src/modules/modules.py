@@ -609,10 +609,18 @@ class RLAgent:
                 if client_output_logit is not None:
                     try:
                         logits = ast.literal_eval(client_output_logit)
-                        p = utils.softmax(logits)
-                        N = len(p)
+                        logits = np.array(logits, dtype=np.float32)
+                        if logits.ndim == 1:
+                            logits = logits[None, :]  # (1, num_classes)
+                        p = utils.softmax(logits)    # shape: (num_samples, num_classes)
+                        N = p.shape[-1]
                         uniform = np.ones(N) / N
-                        kl_divergence = np.sum([pi * np.log((pi + 1e-8)/(ui + 1e-8)) for pi, ui in zip(p, uniform) if pi > 0])
+                        # 각 샘플별 KL, 평균값 사용
+                        kld_list = []
+                        for pi in p:
+                            kld = np.sum([pij * np.log((pij + 1e-8)/(ui + 1e-8)) for pij, ui in zip(pi, uniform) if pij > 0])
+                            kld_list.append(kld)
+                        kl_divergence = float(np.mean(kld_list))
                     except Exception:
                         kl_divergence = 0.0
                     state['kld_softmax'].append(kl_divergence)
