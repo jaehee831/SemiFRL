@@ -11,7 +11,6 @@ from config import cfg
 from scipy.special import rel_entr
 
 
-
 def check_exists(path):
     return os.path.exists(path)
 
@@ -305,3 +304,20 @@ def softmax(x):
         return e_x / sum_per_row
     else:
         raise ValueError("Input array must be 1D or 2D.")
+    
+def calc_kld_from_logits(logits):
+    logits = np.array(logits, dtype=np.float32)
+    if logits.ndim == 1:
+        p = softmax(logits)
+        N = len(p)
+        uniform = np.ones(N) / N
+        return float(np.sum([pi * np.log((pi + 1e-8)/(ui + 1e-8)) for pi, ui in zip(p, uniform)]))
+    elif logits.ndim == 2:
+        p = softmax(logits)
+        N = p.shape[-1]
+        uniform = np.ones(N) / N
+        klds = [np.sum([pij * np.log((pij + 1e-8)/(ui + 1e-8)) for pij, ui in zip(pi, uniform)])
+                for pi in p]
+        return float(np.mean(klds))
+    else:
+        return np.nan

@@ -9,7 +9,7 @@ import models
 from itertools import compress
 from config import cfg
 from data import make_data_loader, make_batchnorm_stats, FixTransform, MixDataset
-from utils import to_device, make_optimizer, collate, to_device, softmax, calc_kld
+from utils import to_device, make_optimizer, collate, to_device, calc_kld_from_logits
 from metrics import Accuracy
 import sqlite3
 import json
@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 from agent.server import ServerAgentDQN
+import wandb
 
 class Server:
     def __init__(self, model):
@@ -563,6 +564,8 @@ class RLAgent:
         self.window_size = window_size 
         # ServerAgentDQN 초기화
         self.agent = ServerAgentDQN(state_dim, num_clients, device)
+        from agent.server import BATCH_SIZE
+        self.BATCH_SIZE = BATCH_SIZE
         self.current_round = 0
         print(f"[RL Agent] DQN 초기화: 클라이언트 수={num_clients}, 상태 크기={state_dim}")
 
@@ -585,7 +588,7 @@ class RLAgent:
 
         for cid in range(self.num_clients):
             cursor.execute('''
-                SELECT participant_frequency, local_msp, lm_ld_client_labels, lm_ld_client_output_logit
+                SELECT participant_frequency, local_msp, lm_ld_client_labels, gm_ld_output_logit
                 FROM fed_rl_data
                 WHERE client_number = ?
                 ORDER BY round DESC
@@ -594,7 +597,7 @@ class RLAgent:
             result = cursor.fetchone()
             
             if result is not None:
-                pfreq, msp, client_labels, client_output_logit = result
+                pfreq, msp, client_labels, server_output_logit = result
                 state['participant_frequency'].append(pfreq/80.0)
                 # state['client_loss'].append(loss)
                 state['client_msp'].append(msp)
@@ -606,21 +609,10 @@ class RLAgent:
                         data_size = 0
                     state['data_size'].append(data_size/500.0)
 
-                if client_output_logit is not None:
+                if server_output_logit is not None:
                     try:
-                        logits = ast.literal_eval(client_output_logit)
-                        logits = np.array(logits, dtype=np.float32)
-                        if logits.ndim == 1:
-                            logits = logits[None, :]  # (1, num_classes)
-                        p = utils.softmax(logits)    # shape: (num_samples, num_classes)
-                        N = p.shape[-1]
-                        uniform = np.ones(N) / N
-                        # 각 샘플별 KL, 평균값 사용
-                        kld_list = []
-                        for pi in p:
-                            kld = np.sum([pij * np.log((pij + 1e-8)/(ui + 1e-8)) for pij, ui in zip(pi, uniform) if pij > 0])
-                            kld_list.append(kld)
-                        kl_divergence = float(np.mean(kld_list))
+                        logits = ast.literal_eval(server_output_logit)
+                        kl_divergence = calc_kld_from_logits(logits)
                     except Exception:
                         kl_divergence = 0.0
                     state['kld_softmax'].append(kl_divergence)
@@ -679,7 +671,8 @@ class RLAgent:
                 # print(f"[RLAgent][Epsilon-Greedy] Q값 기반 선택 (epsilon: {eps_threshold:.3f}) → {selected}")
         return selected
 
-    def update_dqn(self, current_state, client_ids, client_loss_now, server_loss_now, next_state, done=False): # 함수 명명 다시 
+    def update_dqn(self, current_state, client_ids, client_loss_now, server_loss_now, next_state, done=False):
+        print(f"[RLAgent][ReplayBuffer] 현재 버퍼 크기: {len(self.agent.memory)}/{self.BATCH_SIZE}")
         rewards = []
         if client_loss_now and server_loss_now:
             for l_now, s_now in zip(client_loss_now, server_loss_now):
@@ -694,12 +687,18 @@ class RLAgent:
             self.agent.store_transition(current_state, action_idx, reward, next_state, done)
             print(f"[RLAgent][ReplayBuffer] 저장: state_shape={current_state.shape}, action={action_idx}, reward={reward:.4f}")
             loss = self.agent.learn()
+            print(f"[RLAgent][DQN] 학습 후 loss 값: {loss}")  # None인지 확인
             if loss is not None:
                 print(f"[RLAgent][DQN] 학습 loss: {loss:.6f}")
-
+                print(f"[RLAgent][DQN] wandb.log 호출 전")
+                wandb.log({"epoch": self.current_round,
+                           "epsilon": self.epsilon_end + (self.epsilon_start - self.epsilon_end) * \
+                          np.exp(-1. * self.current_round / self.epsilon_decay),
+                            "dqn/reward": reward, "dqn/loss": loss})
+                print(f"[RLAgent][DQN] wandb.log 호출 후") # 확인용
+                          
         if self.current_round % self.agent.TARGET_UPDATE == 0:
             self.agent.update_target_net()
-            print(f"[RLAgent][TargetNet] 타겟 네트워크 업데이트 (round={self.current_round})")
 
     def update_round(self):
         self.current_round += 1

@@ -1,0 +1,216 @@
+_wandb:
+    value:
+        cli_version: 0.21.0
+        e:
+            awhs70xq58c0sfhskd8kbm5kzbqskneo:
+                args:
+                    - --data_name
+                    - CIFAR10
+                    - --model_name
+                    - wresnet28x2
+                    - --control_name
+                    - 250_fix@0.95-mix_100_0.1_non-iid-d-0.3_5-5_0.5_1_1
+                codePath: src/train_classifier_ssfl_RL.py
+                codePathLocal: train_classifier_ssfl_RL.py
+                cpu_count: 48
+                cpu_count_logical: 48
+                cudaVersion: "12.2"
+                disk:
+                    /:
+                        total: "1852541210624"
+                        used: "498081968128"
+                email: jhlee.ug@gm.gist.ac.kr
+                executable: /hdd/jhlee/miniconda3/envs/semifrl/bin/python
+                git:
+                    commit: 61ea90435223fa868e3b6897eb8cdf1c7922311e
+                    remote: https://github.com/jaehee831/SemiFRL.git
+                gpu: NVIDIA RTX A6000
+                gpu_count: 4
+                gpu_nvidia:
+                    - architecture: Ampere
+                      cudaCores: 10752
+                      memoryTotal: "48305799168"
+                      name: NVIDIA RTX A6000
+                      uuid: GPU-8f27bf9f-8bab-b4fb-a347-c30db4e212f7
+                    - architecture: Ampere
+                      cudaCores: 10752
+                      memoryTotal: "48305799168"
+                      name: NVIDIA RTX A6000
+                      uuid: GPU-2753b1c6-3734-5283-6d30-d3552eb11cc6
+                    - architecture: Ampere
+                      cudaCores: 10752
+                      memoryTotal: "48305799168"
+                      name: NVIDIA RTX A6000
+                      uuid: GPU-b4f0ef57-98e5-3d08-daca-824ec7a495f5
+                    - architecture: Ampere
+                      cudaCores: 10752
+                      memoryTotal: "48305799168"
+                      name: NVIDIA RTX A6000
+                      uuid: GPU-0b8ec469-7dd5-f01e-ef82-e410cd92796d
+                host: gpu2
+                memory:
+                    total: "540667129856"
+                os: Linux-5.15.0-139-generic-x86_64-with-glibc2.31
+                program: /ssd/jhlee/semifrl/SSFRL/src/train_classifier_ssfl_RL.py
+                python: CPython 3.11.9
+                root: /ssd/jhlee/semifrl/SSFRL/src
+                startedAt: "2025-07-05T13:02:50.858560Z"
+                writerId: awhs70xq58c0sfhskd8kbm5kzbqskneo
+        m: []
+        python_version: 3.11.9
+        t:
+            "1":
+                - 1
+                - 41
+            "2":
+                - 1
+                - 41
+                - 51
+            "3":
+                - 13
+                - 16
+            "4": 3.11.9
+            "5": 0.21.0
+            "10":
+                - 20
+            "12": 0.21.0
+            "13": linux-x86_64
+active_rate:
+    value: 0.1
+alpha:
+    value: 0.75
+client:
+    value:
+        batch_size:
+            test: 250
+            train: 10
+        num_epochs: 5
+        shuffle:
+            test: false
+            train: true
+client_db_path:
+    value: DB/exp1_0_CIFAR10_wresnet28x2_250_fix@0.95-mix_100_0.1_non-iid-d-0.3_5-5_0.5_1_1_rl_client.db
+control:
+    value:
+        active_rate: "0.1"
+        data_split_mode: non-iid-d-0.3
+        ft: "1"
+        gm: "0.5"
+        local_epoch: 5-5
+        loss_mode: fix@0.95-mix
+        num_clients: "100"
+        num_supervised: "250"
+        sbn: "1"
+control_name:
+    value: 250_fix@0.95-mix_100_0.1_non-iid-d-0.3_5-5_0.5_1_1
+conv:
+    value:
+        hidden_size:
+            - 32
+            - 64
+data_name:
+    value: CIFAR10
+data_shape:
+    value:
+        - 3
+        - 32
+        - 32
+data_split_mode:
+    value: non-iid-d-0.3
+device:
+    value: cuda
+ft:
+    value: 1
+global:
+    value:
+        batch_size:
+            test: 250
+            train: 250
+        lr: 1
+        momentum: 0.5
+        nesterov: false
+        num_epochs: 800
+        optimizer_name: SGD
+        scheduler_name: CosineAnnealingLR
+        shuffle:
+            test: false
+            train: true
+        weight_decay: 0
+gm:
+    value: 0.5
+init_seed:
+    value: 0
+local:
+    value:
+        lr: 0.03
+        momentum: 0.9
+        nesterov: true
+        optimizer_name: SGD
+        weight_decay: 0.0005
+local_epoch:
+    value:
+        - "5"
+        - "5"
+log_interval:
+    value: 0.25
+loss_mode:
+    value: fix@0.95-mix
+model_name:
+    value: wresnet28x2
+model_tag:
+    value: 0_CIFAR10_wresnet28x2_250_fix@0.95-mix_100_0.1_non-iid-d-0.3_5-5_0.5_1_1_rl
+num_clients:
+    value: 100
+num_experiments:
+    value: 1
+num_supervised:
+    value: 250
+num_workers:
+    value: 0
+resnet9:
+    value:
+        hidden_size:
+            - 64
+            - 128
+            - 256
+            - 512
+resnet18:
+    value:
+        hidden_size:
+            - 64
+            - 128
+            - 256
+            - 512
+resume_mode:
+    value: 0
+sbn:
+    value: 1
+server:
+    value:
+        batch_size:
+            test: 500
+            train: 10
+        num_epochs: 5
+        shuffle:
+            test: false
+            train: true
+server_db_path:
+    value: DB/exp1_0_CIFAR10_wresnet28x2_250_fix@0.95-mix_100_0.1_non-iid-d-0.3_5-5_0.5_1_1_rl_server.db
+threshold:
+    value: 0.95
+unsup_ratio:
+    value: 1
+verbose:
+    value: false
+world_size:
+    value: 1
+wresnet28x2:
+    value:
+        depth: 28
+        drop_rate: 0
+        widen_factor: 2
+wresnet28x8:
+    value:
+        depth: 28
+        drop_rate: 0
+        widen_factor: 8

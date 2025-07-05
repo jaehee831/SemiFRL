@@ -19,6 +19,7 @@ from db import create_train_database,create_test_database,sqlite_insert_test_dat
 # from agent.server import ReplayBuffer,ServerAgentDQN
 import sqlite3
 import json
+import wandb
 
 cudnn.benchmark = True
 parser = argparse.ArgumentParser(description='cfg')
@@ -31,12 +32,17 @@ process_args(args)
 def main():
     process_control()
     seeds = list(range(cfg['init_seed'], cfg['init_seed'] + cfg['num_experiments']))
+    
+    prefix = "exp1"  # Prefix for experiment tags
+    
     for i in range(cfg['num_experiments']):
         model_tag_list = [str(seeds[i]), cfg['data_name'], cfg['model_name'], cfg['control_name']]
         cfg['model_tag'] = '_'.join([x for x in model_tag_list if x])
         cfg['model_tag'] +='_rl'
-        cfg['client_db_path'] = f"DB/exp14_{cfg['model_tag']}_client.db"
-        cfg['server_db_path'] = f"DB/exp14_{cfg['model_tag']}_server.db"
+        exp_tag = f"{prefix}_{cfg['model_tag']}" 
+        cfg['client_db_path'] = f"DB/exp1_{cfg['model_tag']}_client.db"
+        cfg['server_db_path'] = f"DB/exp1_{cfg['model_tag']}_server.db"
+        wandb.init(project="SSFRL", name=exp_tag, config=cfg, reinit=True)
         create_train_database(db_name=cfg['client_db_path'])
         create_test_database(db_name=cfg['server_db_path'])
         print('Experiment: {}'.format(cfg['model_tag']))
@@ -132,6 +138,16 @@ def runExperiment():
         logger.reset()
         data_loader_server_train = make_data_loader({'train': server_dataset['train']}, 'server')['train']
         server_eval_ft = test(data_loader_server_train, test_model, metric, logger, epoch)
+        
+        # wandb에 메트릭 기록
+        wandb.log({
+            "epoch": epoch,
+            "test/loss": test_eval.get("Loss", None),
+            "test/accuracy": test_eval.get("Accuracy", None),
+            "server/loss": server_eval_ft.get("Loss", None),
+            "server/accuracy": server_eval_ft.get("Accuracy", None)
+            # 추가
+        })
 
         # 현재 라운드의 클라이언트 정보 가져오기
         now_client_info = [get_client_recent_info(cfg['client_db_path'], cid) for cid in server.agent.selected_client_id_list]
@@ -140,7 +156,7 @@ def runExperiment():
 
         # 1. 현재 상태 재구성
         current_state = server.agent.build_state(client, epoch)
-        # print(f"[연합학습] 현재 상태: {current_state}")
+        print(f"[연합학습] 현재 상태: {current_state}")
         # 2. 다음 상태 구성
         next_state = server.agent.build_state(client, epoch + 1)
         # print(f"[연합학습] 다음 상태: {next_state}")
@@ -168,6 +184,7 @@ def runExperiment():
             shutil.copy('./output/model/{}_checkpoint.pt'.format(cfg['model_tag']),
                         './output/model/{}_best.pt'.format(cfg['model_tag']))
         logger.reset()
+    wandb.finish() # wandb 종료
     return
 
         

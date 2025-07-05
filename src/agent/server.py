@@ -105,8 +105,10 @@ class ServerAgentDQN:
         self.memory.push(state, action_idx, reward, next_state, done)
 
     def learn(self):
+        print(f"[ServerAgentDQN] learn() 함수 호출됨, 버퍼 크기: {len(self.memory)}/{BATCH_SIZE}")
         if len(self.memory) < BATCH_SIZE:
-            return
+            print(f"[ServerAgentDQN] 버퍼 크기 부족으로 학습 건너뜀: {len(self.memory)}/{BATCH_SIZE}")
+            return None
 
         transitions = self.memory.sample(BATCH_SIZE)
         # (state, action_idx, reward, next_state, done) 튜플을 분리
@@ -137,6 +139,8 @@ class ServerAgentDQN:
             if param.grad is not None: # Ensure gradient exists before clamping
                 param.grad.data.clamp_(-1, 1) # Gradient Clipping
         self.optimizer.step()
+
+        return loss.item()  # 이 줄 추가
 
     def update_target_net(self):
         self.target_net.load_state_dict(self.policy_net.state_dict())

@@ -13,6 +13,7 @@ __pycache__/
 /src/DB/
 /src/notebook/
 /src/output/
+/src/state/
 
 # IDE 및 운영체제 관련 파일 무시 (선택 사항)
 .vscode/       # VS Code 설정

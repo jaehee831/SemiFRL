@@ -1,0 +1,69 @@
+{
+  "os":  "Linux-5.15.0-139-generic-x86_64-with-glibc2.31",
+  "python":  "CPython 3.11.9",
+  "startedAt":  "2025-07-05T13:02:50.858560Z",
+  "args":  [
+    "--data_name",
+    "CIFAR10",
+    "--model_name",
+    "wresnet28x2",
+    "--control_name",
+    "250_fix@0.95-mix_100_0.1_non-iid-d-0.3_5-5_0.5_1_1"
+  ],
+  "program":  "/ssd/jhlee/semifrl/SSFRL/src/train_classifier_ssfl_RL.py",
+  "codePath":  "src/train_classifier_ssfl_RL.py",
+  "codePathLocal":  "train_classifier_ssfl_RL.py",
+  "git":  {
+    "remote":  "https://github.com/jaehee831/SemiFRL.git",
+    "commit":  "61ea90435223fa868e3b6897eb8cdf1c7922311e"
+  },
+  "email":  "jhlee.ug@gm.gist.ac.kr",
+  "root":  "/ssd/jhlee/semifrl/SSFRL/src",
+  "host":  "gpu2",
+  "executable":  "/hdd/jhlee/miniconda3/envs/semifrl/bin/python",
+  "cpu_count":  48,
+  "cpu_count_logical":  48,
+  "gpu":  "NVIDIA RTX A6000",
+  "gpu_count":  4,
+  "disk":  {
+    "/":  {
+      "total":  "1852541210624",
+      "used":  "498081968128"
+    }
+  },
+  "memory":  {
+    "total":  "540667129856"
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA RTX A6000",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  10752,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-8f27bf9f-8bab-b4fb-a347-c30db4e212f7"
+    },
+    {
+      "name":  "NVIDIA RTX A6000",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  10752,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-2753b1c6-3734-5283-6d30-d3552eb11cc6"
+    },
+    {
+      "name":  "NVIDIA RTX A6000",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  10752,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-b4f0ef57-98e5-3d08-daca-824ec7a495f5"
+    },
+    {
+      "name":  "NVIDIA RTX A6000",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  10752,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-0b8ec469-7dd5-f01e-ef82-e410cd92796d"
+    }
+  ],
+  "cudaVersion":  "12.2",
+  "writerId":  "awhs70xq58c0sfhskd8kbm5kzbqskneo"
+}

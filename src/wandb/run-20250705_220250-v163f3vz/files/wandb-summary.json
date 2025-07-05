@@ -1,0 +1,1 @@
+{"_timestamp":1.7517207066411297e+09,"epsilon":0.9821788059760799,"_wandb":{"runtime":150},"test/loss":1.9101845443248748,"dqn/loss":13.42370319366455,"_step":23,"test/accuracy":32.140000534057606,"epoch":2,"server/loss":1.1602997732162477,"server/accuracy":56.4,"_runtime":150,"dqn/reward":0}

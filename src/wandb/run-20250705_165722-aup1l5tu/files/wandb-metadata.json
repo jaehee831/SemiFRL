@@ -1,0 +1,36 @@
+{
+  "os":  "Linux-5.15.0-139-generic-x86_64-with-glibc2.31",
+  "python":  "CPython 3.11.9",
+  "startedAt":  "2025-07-05T07:57:22.982427Z",
+  "args":  [
+    "--data_name",
+    "CIFAR100",
+    "--model_name",
+    "wresnet28x8",
+    "--control_name",
+    "2500_fix@0.95-mix_100_0.1_non-iid-d-0.3_5-5_0.5_1_1"
+  ],
+  "program":  "/ssd/jhlee/semifrl/SSFRL/src/train_classifier_ssfl_RL.py",
+  "codePath":  "src/train_classifier_ssfl_RL.py",
+  "codePathLocal":  "train_classifier_ssfl_RL.py",
+  "git":  {
+    "remote":  "https://github.com/jaehee831/SemiFRL.git",
+    "commit":  "61ea90435223fa868e3b6897eb8cdf1c7922311e"
+  },
+  "email":  "jhlee.ug@gm.gist.ac.kr",
+  "root":  "/ssd/jhlee/semifrl/SSFRL/src",
+  "host":  "gpu2",
+  "executable":  "/hdd/jhlee/miniconda3/envs/semifrl/bin/python",
+  "cpu_count":  48,
+  "cpu_count_logical":  48,
+  "disk":  {
+    "/":  {
+      "total":  "1852541210624",
+      "used":  "498081701888"
+    }
+  },
+  "memory":  {
+    "total":  "540667129856"
+  },
+  "writerId":  "vqjtoqrglxxotejg43he42b78gaabniz"
+}
