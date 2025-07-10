@@ -689,8 +689,8 @@ class RLAgent:
             loss = self.agent.learn()
             print(f"[RLAgent][DQN] 학습 후 loss 값: {loss}")  # None인지 확인
             if loss is not None:
-                print(f"[RLAgent][DQN] 학습 loss: {loss:.6f}")
-                print(f"[RLAgent][DQN] wandb.log 호출 전")
+                # print(f"[RLAgent][DQN] 학습 loss: {loss:.6f}")
+                # print(f"[RLAgent][DQN] wandb.log 호출 전")
                 wandb.log({"epoch": self.current_round,
                            "epsilon": self.epsilon_end + (self.epsilon_start - self.epsilon_end) * \
                           np.exp(-1. * self.current_round / self.epsilon_decay),
