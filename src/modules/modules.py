@@ -567,7 +567,7 @@ class RLAgent:
         from agent.server import BATCH_SIZE
         self.BATCH_SIZE = BATCH_SIZE
         self.current_round = 0
-        print(f"[RL Agent] DQN 초기화: 클라이언트 수={num_clients}, 상태 크기={state_dim}")
+      
 
     def build_state(self, clients, current_round):
         """
@@ -588,7 +588,7 @@ class RLAgent:
 
         for cid in range(self.num_clients):
             cursor.execute('''
-                SELECT participant_frequency, local_msp, lm_ld_client_labels, gm_ld_output_logit
+                SELECT participant_frequency, local_msp, lm_ld_client_labels, server_output_logit
                 FROM fed_rl_data
                 WHERE client_number = ?
                 ORDER BY round DESC
@@ -674,10 +674,48 @@ class RLAgent:
     def update_dqn(self, current_state, client_ids, client_loss_now, server_loss_now, next_state, done=False):
         print(f"[RLAgent][ReplayBuffer] 현재 버퍼 크기: {len(self.agent.memory)}/{self.BATCH_SIZE}")
         rewards = []
+        l_server_list = []
+        delta_l_global_list = []
+        kld_list = []
+        
+        from db import get_global_model_result
+        prev_global_loss = 0.0  # 기본값 0으로 설정
+        if self.current_round > 1:
+            prev_result = get_global_model_result(cfg['server_db_path'], self.current_round - 1)
+            if prev_result:
+                prev_global_loss = prev_result['agg_ft_server_loss']
+        
+        # 현재 라운드 글로벌 모델 정보 가져오기
+        current_result = get_global_model_result(cfg['server_db_path'], self.current_round)
+        current_global_loss = 0.0
+        if current_result:
+            current_global_loss = current_result['agg_ft_server_loss']
+
+        lambda1 = 0.5  # L_server 가중치
+        lambda2 = 0.7  # delta(L_global) 가중치
+        lambda3 = 0.3  # KLD 가중치
+        
         if client_loss_now and server_loss_now:
-            for l_now, s_now in zip(client_loss_now, server_loss_now):
-                reward = -(l_now + s_now)
+            for i, cid in enumerate(client_ids):
+                l_server = server_loss_now[i] if i < len(server_loss_now) else 0.0
+                
+                # delta L_global 계산 
+                delta_l_global = current_global_loss - prev_global_loss
+                
+                # KLD 값 가져오기 (state에서 해당 클라이언트의 KLD 값)
+                # 상태 구조: [round, *participant_frequency, *client_loss_histories, *client_msp, *data_size, *kld_softmax]
+                # kld_softmax 인덱스: 1 + num_clients + window_size*num_clients + 2*num_clients + cid
+                kld_index = 1 + self.num_clients + self.window_size * self.num_clients + 2 * self.num_clients + cid
+                kld = current_state[kld_index] if kld_index < len(current_state) else 0.0
+                
+                l_server_list.append(l_server)
+                delta_l_global_list.append(delta_l_global)
+                kld_list.append(kld)
+                
+                # 리워드 계산: r = -(λ1*L_server + λ2*ΔL_global + λ3*KLD) + 1
+                reward = -(lambda1 * l_server - lambda2 * delta_l_global + lambda3 * kld) + 1.0
                 rewards.append(reward)
+                print(f"[RLAgent][Reward] 클라이언트 {cid}: L_server={l_server:.4f}, ΔL_global={delta_l_global:.4f}, KLD={kld:.4f}, 보상={reward:.4f}")
         else:
             rewards = [0.0] * len(client_ids)
 
@@ -685,18 +723,27 @@ class RLAgent:
             reward = rewards[i] if i < len(rewards) else 0.0
             action_idx = cid
             self.agent.store_transition(current_state, action_idx, reward, next_state, done)
-            print(f"[RLAgent][ReplayBuffer] 저장: state_shape={current_state.shape}, action={action_idx}, reward={reward:.4f}")
+            print(f"[RLAgent][ReplayBuffer] 저장: state_shape={len(current_state)}, action={action_idx}, reward={reward:.4f}")
             loss = self.agent.learn()
-            print(f"[RLAgent][DQN] 학습 후 loss 값: {loss}")  # None인지 확인
-            if loss is not None:
-                # print(f"[RLAgent][DQN] 학습 loss: {loss:.6f}")
-                # print(f"[RLAgent][DQN] wandb.log 호출 전")
-                wandb.log({"epoch": self.current_round,
-                           "epsilon": self.epsilon_end + (self.epsilon_start - self.epsilon_end) * \
-                          np.exp(-1. * self.current_round / self.epsilon_decay),
-                            "dqn/reward": reward, "dqn/loss": loss})
-                print(f"[RLAgent][DQN] wandb.log 호출 후") # 확인용
+            # if loss is not None:
+            #     wandb.log({"epoch": self.current_round,
+            #           "epsilon": self.epsilon_end + (self.epsilon_start - self.epsilon_end) * \
+            #           np.exp(-1. * self.current_round / self.epsilon_decay),
+            #           "dqn/reward": reward, 
+            #           "dqn/loss": loss})
                           
+        # --- trajectory logging ---
+        if l_server_list:
+            wandb.log({
+                "trajectory/l_server_mean": np.mean(l_server_list),
+                "trajectory/l_server_std": np.std(l_server_list),
+                "trajectory/delta_l_global_mean": np.mean(delta_l_global_list),
+                "trajectory/delta_l_global_std": np.std(delta_l_global_list),
+                "trajectory/kld_mean": np.mean(kld_list),
+                "trajectory/kld_std": np.std(kld_list),
+                "epoch": self.current_round
+            }, step=self.current_round)
+        
         if self.current_round % self.agent.TARGET_UPDATE == 0:
             self.agent.update_target_net()
 
