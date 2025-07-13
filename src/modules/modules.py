@@ -567,8 +567,23 @@ class RLAgent:
         from agent.server import BATCH_SIZE
         self.BATCH_SIZE = BATCH_SIZE
         self.current_round = 0
-      
+        
+        self.stats = {
+            "L_server": {"min": float("inf"), "max": float("-inf")},
+            "dL_global": {"min": float("inf"), "max": float("-inf")},
+            "KLD": {"min": float("inf"), "max": float("-inf")},
+        }    
 
+    def _update_minmax(self, key, value):
+        stat = self.stats[key]
+        stat["min"] = min(stat["min"], value)
+        stat["max"] = max(stat["max"], value)
+        return stat
+
+    def _scale(self, key, value, eps=1e-8):
+        stat = self.stats[key]
+        return (value - stat["min"]) / (stat["max"] - stat["min"] + eps)
+    
     def build_state(self, clients, current_round):
         """
         DB에서 클라이언트별 최근 상태를 가져와 state 벡터 생성
@@ -579,7 +594,7 @@ class RLAgent:
             'client_loss': [],
             'client_msp': [],
             'data_size': [],
-            'kld_softmax': []
+            'kld': []
         }
 
         db_name = cfg['client_db_path']
@@ -615,13 +630,13 @@ class RLAgent:
                         kl_divergence = calc_kld_from_logits(logits)
                     except Exception:
                         kl_divergence = 0.0
-                    state['kld_softmax'].append(kl_divergence)
+                    state['kld'].append(kl_divergence)
             else:
                 state['participant_frequency'].append(0.0)
                 # state['client_loss'].append(0.0)
                 state['client_msp'].append(0.8)
                 state['data_size'].append(0.0)
-                state['kld_softmax'].append(0.0)
+                state['kld'].append(0.0)
 
             cursor.execute('''
                 SELECT local_loss
@@ -649,7 +664,7 @@ class RLAgent:
             *[loss for loss_history in state['client_loss'] for loss in loss_history],  # flatten
             *state['client_msp'],
             *state['data_size'],
-            *state['kld_softmax']
+            *state['kld']
         ], dtype=np.float32)
         
         print("state_dim:", len(state_array))
@@ -671,6 +686,15 @@ class RLAgent:
                 # print(f"[RLAgent][Epsilon-Greedy] Q값 기반 선택 (epsilon: {eps_threshold:.3f}) → {selected}")
         return selected
 
+    def _get_lambdas(self, round_idx):
+        if round_idx < 100:
+            return 0.5, 0.4, 0.1
+        elif round_idx < 300:
+            return 0.6, 0.2, 0.2
+        else:
+            return 0.6, 0.0, 0.4 # 수정 필요
+
+    
     def update_dqn(self, current_state, client_ids, client_loss_now, server_loss_now, next_state, done=False):
         print(f"[RLAgent][ReplayBuffer] 현재 버퍼 크기: {len(self.agent.memory)}/{self.BATCH_SIZE}")
         rewards = []
@@ -691,31 +715,47 @@ class RLAgent:
         if current_result:
             current_global_loss = current_result['agg_ft_server_loss']
 
-        lambda1 = 0.5  # L_server 가중치
-        lambda2 = 0.7  # delta(L_global) 가중치
-        lambda3 = 0.3  # KLD 가중치
+        lambda1, lambda2, lambda3 = self._get_lambdas(self.current_round)
+        # delta L_global 계산 (라운드 공통 값)
+        delta_l_global = current_global_loss - prev_global_loss
+        self._update_minmax("dL_global", delta_l_global)
         
         if client_loss_now and server_loss_now:
             for i, cid in enumerate(client_ids):
                 l_server = server_loss_now[i] if i < len(server_loss_now) else 0.0
-                
-                # delta L_global 계산 
-                delta_l_global = current_global_loss - prev_global_loss
-                
+
                 # KLD 값 가져오기 (state에서 해당 클라이언트의 KLD 값)
-                # 상태 구조: [round, *participant_frequency, *client_loss_histories, *client_msp, *data_size, *kld_softmax]
-                # kld_softmax 인덱스: 1 + num_clients + window_size*num_clients + 2*num_clients + cid
+                # 상태 구조: [round, *participant_frequency, *client_loss_histories, *client_msp, *data_size, *kld]
+                # kld 인덱스: 1 + num_clients + window_size*num_clients + 2*num_clients + cid
                 kld_index = 1 + self.num_clients + self.window_size * self.num_clients + 2 * self.num_clients + cid
                 kld = current_state[kld_index] if kld_index < len(current_state) else 0.0
                 
+                # wandb logging
                 l_server_list.append(l_server)
                 delta_l_global_list.append(delta_l_global)
                 kld_list.append(kld)
                 
-                # 리워드 계산: r = -(λ1*L_server + λ2*ΔL_global + λ3*KLD) + 1
-                reward = -(lambda1 * l_server - lambda2 * delta_l_global + lambda3 * kld) + 1.0
+                # 모든 클라이언트의 KLD 기록 
+                wandb.log({
+                    "all_clients/kld_hist": wandb.Histogram(np.array(kld_list)),
+                    "all_clients/kld_list": kld_list,
+                    "epoch": self.current_round
+                }, step=self.current_round)
+                
+                # min-max 업데이트
+                self._update_minmax("L_server", l_server)
+                self._update_minmax("KLD", kld)
+                
+                # 정규화
+                l_scaled = self._scale("L_server", l_server)
+                dL_scaled = self._scale("dL_global", delta_l_global)
+                kld_scaled = self._scale("KLD", kld)
+                
+                # 리워드 계산: r = -(λ1*L_server - λ2*ΔL_global + λ3*KLD) + 1
+                reward = 1.0 - (lambda1*l_scaled - lambda2*dL_scaled + lambda3*kld_scaled)
                 rewards.append(reward)
-                print(f"[RLAgent][Reward] 클라이언트 {cid}: L_server={l_server:.4f}, ΔL_global={delta_l_global:.4f}, KLD={kld:.4f}, 보상={reward:.4f}")
+                print(f"[Reward] cid={cid}  L={l_server:.3f}  ΔL={delta_l_global:.3f}  KLD={kld:.3f}  "
+              f"→ scaled=({l_scaled:.3f},{dL_scaled:.3f},{kld_scaled:.3f})  r={reward:.3f}")
         else:
             rewards = [0.0] * len(client_ids)
 
@@ -741,6 +781,13 @@ class RLAgent:
                 "trajectory/delta_l_global_std": np.std(delta_l_global_list),
                 "trajectory/kld_mean": np.mean(kld_list),
                 "trajectory/kld_std": np.std(kld_list),
+                # ───── 정규화(mean-max) 평균 · 분산 ─────
+                "trajectory/l_server_scaled_mean":   np.mean([self._scale("L_server", v)   for v in l_server_list]),
+                "trajectory/l_server_scaled_std":    np.std( [self._scale("L_server", v)   for v in l_server_list]),
+                "trajectory/dL_global_scaled_mean":  np.mean([self._scale("dL_global", v)  for v in delta_l_global_list]),
+                "trajectory/dL_global_scaled_std":   np.std( [self._scale("dL_global", v)  for v in delta_l_global_list]),
+                "trajectory/kld_scaled_mean":        np.mean([self._scale("KLD", v)        for v in kld_list]),
+                "trajectory/kld_scaled_std":         np.std( [self._scale("KLD", v)        for v in kld_list]),
                 "epoch": self.current_round
             }, step=self.current_round)
         
