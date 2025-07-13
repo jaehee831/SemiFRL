@@ -33,15 +33,15 @@ def main():
     process_control()
     seeds = list(range(cfg['init_seed'], cfg['init_seed'] + cfg['num_experiments']))
     
-    prefix = "reward_change"  # Prefix for experiment tags
+    prefix = "cxp2"  # Prefix for experiment tags
     
     for i in range(cfg['num_experiments']):
         model_tag_list = [str(seeds[i]), cfg['data_name'], cfg['model_name'], cfg['control_name']]
         cfg['model_tag'] = '_'.join([x for x in model_tag_list if x])
         cfg['model_tag'] +='_rl'
         exp_tag = f"{prefix}_{cfg['model_tag']}" 
-        cfg['client_db_path'] = f"DB/reward_change_{cfg['model_tag']}_client.db"
-        cfg['server_db_path'] = f"DB/reward_change_{cfg['model_tag']}_server.db"
+        cfg['client_db_path'] = f"DB/{prefix}_{cfg['model_tag']}_client.db"
+        cfg['server_db_path'] = f"DB/{prefix}_{cfg['model_tag']}_server.db"
         wandb.init(project="SSFRL", name=exp_tag, config=cfg, reinit=True)
         create_train_database(db_name=cfg['client_db_path'])
         create_test_database(db_name=cfg['server_db_path'])

@@ -51,13 +51,13 @@ def main():
         runExperiment()
     return
 
-def get_kld_softmax_all_clients():
+def get_kld_all_clients():
     """
-    DB에서 각 클라이언트의 최신 kld_softmax 값을 가져옴
+    DB에서 각 클라이언트의 최신 kld 값을 가져옴
     """
   
     db_name = cfg['client_db_path']
-    kld_softmax_list = []
+    kld_list = []
     for cid in range(cfg['num_clients']):
         conn = sqlite3.connect(db_name, timeout=5)
         cursor = conn.cursor()
@@ -78,9 +78,9 @@ def get_kld_softmax_all_clients():
                 kld = 0.0
         else:
             kld = 0.0
-        kld_softmax_list.append(kld)
+        kld_list.append(kld)
         conn.close()
-    return kld_softmax_list
+    return kld_list
 
 def runExperiment():
     cfg['seed'] = int(cfg['model_tag'].split('_')[0])
@@ -236,12 +236,13 @@ def train_client(batchnorm_dataset, server_dataset_train, client_dataset, server
     num_active_clients = int(np.ceil(cfg['active_rate'] * cfg['num_clients']))
 
     # --- KLD 기반 클라이언트 제외 로직 ---
+    np.random.seed(cfg['seed'] + epoch)
     if epoch > 200:
-        kld_softmax_list = get_kld_softmax_all_clients()
-        kld_softmax_np = np.array(kld_softmax_list)
+        kld_list = get_kld_all_clients()
+        kld_np = np.array(kld_list)
         # 상위 20% 인덱스 구하기
         num_exclude = max(1, int(cfg['num_clients'] * 0.2))
-        exclude_indices = kld_softmax_np.argsort()[-num_exclude:]
+        exclude_indices = kld_np.argsort()[-num_exclude:]
         # 선택 가능한 클라이언트 pool
         candidate_indices = np.setdiff1d(np.arange(cfg['num_clients']), exclude_indices)
         # 랜덤 선택
@@ -251,13 +252,13 @@ def train_client(batchnorm_dataset, server_dataset_train, client_dataset, server
             selected_clients = np.random.choice(candidate_indices, num_active_clients, replace=False).tolist()
         # wandb 로깅
         try:
-            selected_klds = kld_softmax_np[selected_clients]
-            excluded_klds = kld_softmax_np[exclude_indices]
+            selected_klds = kld_np[selected_clients]
+            excluded_klds = kld_np[exclude_indices]
             wandb.log({
-                "selected_clients/kld_softmax_mean": float(np.mean(selected_klds)),
-                "selected_clients/kld_softmax_std": float(np.std(selected_klds)),
-                "excluded_clients/kld_softmax_mean": float(np.mean(excluded_klds)),
-                "excluded_clients/kld_softmax_std": float(np.std(excluded_klds)),
+                "selected_clients/kld_mean": float(np.mean(selected_klds)),
+                "selected_clients/kld_std": float(np.std(selected_klds)),
+                "excluded_clients/kld_mean": float(np.mean(excluded_klds)),
+                "excluded_clients/kld_std": float(np.std(excluded_klds)),
                 "epoch": epoch
             }, step=epoch)
         except ImportError:
@@ -265,6 +266,14 @@ def train_client(batchnorm_dataset, server_dataset_train, client_dataset, server
     else:
         # 초기 200라운드는 전체에서 랜덤 선택
         selected_clients = np.random.choice(cfg['num_clients'], num_active_clients, replace=False).tolist()
+
+    # --- 모든 클라이언트의 KLD 리스트 wandb에 기록 ---
+    kld_list = get_kld_all_clients()
+    wandb.log({
+        "all_clients/kld_hist": wandb.Histogram(np.array(kld_list)),
+        "all_clients/kld_list": kld_list,
+        "epoch": epoch
+    }, step=epoch)
 
     for i in range(num_active_clients):
         client[selected_clients[i]].active = True
@@ -389,3 +398,4 @@ def plot_metrics(logger, metric_name, save_path):
 
 if __name__ == "__main__":
     main()
+    wandb.finish()
