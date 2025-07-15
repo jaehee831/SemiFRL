@@ -131,8 +131,9 @@ def get_client_recent_info(client_db_path,client_number):
             'local_epoch':local_epoch,
             'local_msp':local_msp}
 
-def get_client_server_output_softmax_sum(client_db_path,client_number):
-    conn = sqlite3.connect(client_db_path,timeout=5)
+def get_client_server_output_softmax_sum(client_db_path, client_number):
+    from config import cfg
+    conn = sqlite3.connect(client_db_path, timeout=5)
     cursor = conn.cursor()
     cursor.execute(f'''
         SELECT server_output_logit
@@ -141,10 +142,31 @@ def get_client_server_output_softmax_sum(client_db_path,client_number):
     ''')
     server_output_logit = cursor.fetchall()
     conn.close()
+    
+    if not server_output_logit:  # 빈 결과
+        return np.array([1.0/cfg['target_size']] * cfg['target_size'])  # uniform 분포
+    
     client_output_softmax_mean = []
     for logit in server_output_logit:
-        client_output_softmax_mean.append(softmax(np.array(json.loads(logit[0])).astype(float)).mean(axis=0))
-    return np.mean(client_output_softmax_mean,axis=0)
+        try:
+            arr = np.array(json.loads(logit[0])).astype(float)
+            if arr.ndim == 2:
+                client_output_softmax_mean.append(softmax(arr).mean(axis=0))
+            elif arr.ndim == 1:
+                client_output_softmax_mean.append(softmax(arr))
+        except Exception:
+            continue
+    
+    if len(client_output_softmax_mean) == 0:
+        return np.array([1.0/cfg['target_size']] * cfg['target_size'])  # uniform 분포
+    
+    mean_vec = np.mean(client_output_softmax_mean, axis=0)
+    
+    # NaN 체크 후 uniform 분포로 대체
+    if np.any(np.isnan(mean_vec)) or np.any(np.isinf(mean_vec)):
+        return np.array([1.0/cfg['target_size']] * cfg['target_size'])
+    
+    return mean_vec
 
 def has_client_training_log(client_db_path,client_number):
     conn = sqlite3.connect(client_db_path,timeout=5)
