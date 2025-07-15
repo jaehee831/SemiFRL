@@ -12,7 +12,7 @@ from data import fetch_dataset, split_dataset, make_data_loader, separate_datase
     make_batchnorm_dataset_su, make_batchnorm_stats
 from metrics import Metric
 from modules import Server, Client
-from utils import save, to_device, process_control, process_dataset, make_optimizer, make_scheduler, resume, collate, calc_kld_from_logits
+from utils import save, to_device, process_control, process_dataset, make_optimizer, make_scheduler, resume, collate, calc_kld_from_logits, calc_kld
 from logger import make_logger
 from db import create_train_database,create_test_database,sqlite_insert_test_data,get_global_model_result, \
                 get_client_recent_info, get_client_server_output_softmax_sum
@@ -34,7 +34,7 @@ def main():
     process_control()
     seeds = list(range(cfg['init_seed'], cfg['init_seed'] + cfg['num_experiments']))
     
-    prefix = "wo_kld"
+    prefix = "w_kld_20"
     
     for i in range(cfg['num_experiments']):
         model_tag_list = [str(seeds[i]), cfg['data_name'], cfg['model_name'], cfg['control_name']]
@@ -51,35 +51,18 @@ def main():
         runExperiment()
     return
 
-def get_kld_all_clients():
-    """
-    DB에서 각 클라이언트의 최신 kld 값을 가져옴
-    """
-  
-    db_name = cfg['client_db_path']
+def get_kld_all_clients(): 
     kld_list = []
     for cid in range(cfg['num_clients']):
-        conn = sqlite3.connect(db_name, timeout=5)
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT server_output_logit
-            FROM fed_rl_data
-            WHERE client_number = ?
-            ORDER BY round DESC
-            LIMIT 1
-        ''', (cid,))
-        result = cursor.fetchone()
-        if result and result[0]:
-            try:
-                logits = ast.literal_eval(result[0])
-                # KLD 계산 함수는 utils에 있다고 가정
-                kld = calc_kld_from_logits(logits)
-            except Exception:
+        try:
+            softmax_mean = get_client_server_output_softmax_sum(cfg['client_db_path'], cid)
+            kld = calc_kld(softmax_mean, num_classes=cfg['target_size'])
+            if np.isnan(kld) or np.isinf(kld):
                 kld = 0.0
-        else:
+        except Exception:
             kld = 0.0
         kld_list.append(kld)
-        conn.close()
+    print(f"[DEBUG] get_kld_all_clients: shape={np.array(kld_list).shape}")    
     return kld_list
 
 def runExperiment():
@@ -271,7 +254,7 @@ def train_client(batchnorm_dataset, server_dataset_train, client_dataset, server
     kld_list = get_kld_all_clients()
     wandb.log({
         "all_clients/kld_hist": wandb.Histogram(np.array(kld_list)),
-        "all_clients/kld_list": kld_list,
+        f"all_clients/kld_scatter_{epoch}": wandb.Table(data=[[epoch, i, kld] for i, kld in enumerate(kld_list)], columns=["epoch", "client_id", "kld"]),
         "epoch": epoch
     }, step=epoch)
 
