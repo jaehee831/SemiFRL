@@ -9,7 +9,8 @@ import models
 from itertools import compress
 from config import cfg
 from data import make_data_loader, make_batchnorm_stats, FixTransform, MixDataset
-from utils import to_device, make_optimizer, collate, to_device, calc_kld_from_logits
+from utils import to_device, make_optimizer, collate, to_device, calc_kld_from_logits, calc_kld
+from db import get_client_server_output_softmax_sum
 from metrics import Accuracy
 import sqlite3
 import json
@@ -270,7 +271,7 @@ class Client:
             with torch.no_grad():
                 data_loader = make_data_loader({'train': dataset}, 'global', shuffle={'train': False})['train']
                 model = eval('models.{}(track=True).to(cfg["device"])'.format(cfg['model_name']))
-                model.load_state_dict(self.model_state_dict)
+                model.load_state_dict(self.model_state_dict, strict=False) # 수정됨 
                 model.train(False)
                 output = []
                 target = []
@@ -624,16 +625,22 @@ class RLAgent:
                         data_size = 0
                     state['data_size'].append(data_size/500.0)
 
-                if server_output_logit is not None:
-                    try:
-                        logits = ast.literal_eval(server_output_logit)
-                        kl_divergence = calc_kld_from_logits(logits)
-                    except Exception:
-                        kl_divergence = 0.0
-                    state['kld'].append(kl_divergence)
+                # if server_output_logit is not None:
+                #     try:
+                #         logits = ast.literal_eval(server_output_logit)
+                #         kl_divergence = calc_kld_from_logits(logits)
+                #     except Exception:
+                #         kl_divergence = 0.0
+                #     state['kld'].append(kl_divergence)
+                try:
+                    softmax_mean = get_client_server_output_softmax_sum(cfg['client_db_path'], cid)
+                    kld = calc_kld(softmax_mean, num_classes=cfg['target_size'])
+                except Exception:
+                    kld = 0.0
+                state['kld'].append(kld)
+                
             else:
                 state['participant_frequency'].append(0.0)
-                # state['client_loss'].append(0.0)
                 state['client_msp'].append(0.8)
                 state['data_size'].append(0.0)
                 state['kld'].append(0.0)
@@ -685,77 +692,37 @@ class RLAgent:
                 selected = torch.topk(q_values, num_active_clients)[1].squeeze().cpu().numpy().tolist()
                 # print(f"[RLAgent][Epsilon-Greedy] Q값 기반 선택 (epsilon: {eps_threshold:.3f}) → {selected}")
         return selected
-
-    def _get_lambdas(self, round_idx):
-        if round_idx < 100:
-            return 0.5, 0.4, 0.1
-        elif round_idx < 300:
-            return 0.6, 0.2, 0.2
-        else:
-            return 0.6, 0.0, 0.4 # 수정 필요
-
     
     def update_dqn(self, current_state, client_ids, client_loss_now, server_loss_now, next_state, done=False):
-        print(f"[RLAgent][ReplayBuffer] 현재 버퍼 크기: {len(self.agent.memory)}/{self.BATCH_SIZE}")
+        # print(f"[RLAgent][ReplayBuffer] 현재 버퍼 크기: {len(self.agent.memory)}/{self.BATCH_SIZE}")
         rewards = []
-        l_server_list = []
-        delta_l_global_list = []
-        kld_list = []
+        local_loss_list = []
+        server_loss_list = []
+        global_loss_list = []
         
         from db import get_global_model_result
-        prev_global_loss = 0.0  # 기본값 0으로 설정
-        if self.current_round > 1:
-            prev_result = get_global_model_result(cfg['server_db_path'], self.current_round - 1)
-            if prev_result:
-                prev_global_loss = prev_result['agg_ft_server_loss']
         
         # 현재 라운드 글로벌 모델 정보 가져오기
         current_result = get_global_model_result(cfg['server_db_path'], self.current_round)
         current_global_loss = 0.0
         if current_result:
             current_global_loss = current_result['agg_ft_server_loss']
-
-        lambda1, lambda2, lambda3 = self._get_lambdas(self.current_round)
-        # delta L_global 계산 (라운드 공통 값)
-        delta_l_global = current_global_loss - prev_global_loss
-        self._update_minmax("dL_global", delta_l_global)
         
         if client_loss_now and server_loss_now:
             for i, cid in enumerate(client_ids):
-                l_server = server_loss_now[i] if i < len(server_loss_now) else 0.0
+                local_loss = client_loss_now[i] if i < len(client_loss_now) else 0.0
+                # fix_size = fix_dataset_sizes[i] if i < len(fix_dataset_sizes) and fix_dataset_sizes[i] > 0 else 1.0
+                # local_loss_per_sample = local_loss / fix_size
 
-                # KLD 값 가져오기 (state에서 해당 클라이언트의 KLD 값)
-                # 상태 구조: [round, *participant_frequency, *client_loss_histories, *client_msp, *data_size, *kld]
-                # kld 인덱스: 1 + num_clients + window_size*num_clients + 2*num_clients + cid
-                kld_index = 1 + self.num_clients + self.window_size * self.num_clients + 2 * self.num_clients + cid
-                kld = current_state[kld_index] if kld_index < len(current_state) else 0.0
+                server_loss = server_loss_now[i] if i < len(server_loss_now) else 0.0
+                global_loss = current_global_loss
+
+                local_loss_list.append(local_loss)
+                server_loss_list.append(server_loss)
+                global_loss_list.append(global_loss)
                 
-                # wandb logging
-                l_server_list.append(l_server)
-                delta_l_global_list.append(delta_l_global)
-                kld_list.append(kld)
-                
-                # 모든 클라이언트의 KLD 기록 
-                wandb.log({
-                    "all_clients/kld_hist": wandb.Histogram(np.array(kld_list)),
-                    "all_clients/kld_list": kld_list,
-                    "epoch": self.current_round
-                }, step=self.current_round)
-                
-                # min-max 업데이트
-                self._update_minmax("L_server", l_server)
-                self._update_minmax("KLD", kld)
-                
-                # 정규화
-                l_scaled = self._scale("L_server", l_server)
-                dL_scaled = self._scale("dL_global", delta_l_global)
-                kld_scaled = self._scale("KLD", kld)
-                
-                # 리워드 계산: r = -(λ1*L_server - λ2*ΔL_global + λ3*KLD) + 1
-                reward = 1.0 - (lambda1*l_scaled - lambda2*dL_scaled + lambda3*kld_scaled)
+                reward = -(local_loss + server_loss + global_loss)
                 rewards.append(reward)
-                print(f"[Reward] cid={cid}  L={l_server:.3f}  ΔL={delta_l_global:.3f}  KLD={kld:.3f}  "
-              f"→ scaled=({l_scaled:.3f},{dL_scaled:.3f},{kld_scaled:.3f})  r={reward:.3f}")
         else:
             rewards = [0.0] * len(client_ids)
 
@@ -765,31 +732,16 @@ class RLAgent:
             self.agent.store_transition(current_state, action_idx, reward, next_state, done)
             print(f"[RLAgent][ReplayBuffer] 저장: state_shape={len(current_state)}, action={action_idx}, reward={reward:.4f}")
             loss = self.agent.learn()
-            # if loss is not None:
-            #     wandb.log({"epoch": self.current_round,
-            #           "epsilon": self.epsilon_end + (self.epsilon_start - self.epsilon_end) * \
-            #           np.exp(-1. * self.current_round / self.epsilon_decay),
-            #           "dqn/reward": reward, 
-            #           "dqn/loss": loss})
                           
-        # --- trajectory logging ---
-        if l_server_list:
-            wandb.log({
-                "trajectory/l_server_mean": np.mean(l_server_list),
-                "trajectory/l_server_std": np.std(l_server_list),
-                "trajectory/delta_l_global_mean": np.mean(delta_l_global_list),
-                "trajectory/delta_l_global_std": np.std(delta_l_global_list),
-                "trajectory/kld_mean": np.mean(kld_list),
-                "trajectory/kld_std": np.std(kld_list),
-                # ───── 정규화(mean-max) 평균 · 분산 ─────
-                "trajectory/l_server_scaled_mean":   np.mean([self._scale("L_server", v)   for v in l_server_list]),
-                "trajectory/l_server_scaled_std":    np.std( [self._scale("L_server", v)   for v in l_server_list]),
-                "trajectory/dL_global_scaled_mean":  np.mean([self._scale("dL_global", v)  for v in delta_l_global_list]),
-                "trajectory/dL_global_scaled_std":   np.std( [self._scale("dL_global", v)  for v in delta_l_global_list]),
-                "trajectory/kld_scaled_mean":        np.mean([self._scale("KLD", v)        for v in kld_list]),
-                "trajectory/kld_scaled_std":         np.std( [self._scale("KLD", v)        for v in kld_list]),
-                "epoch": self.current_round
-            }, step=self.current_round)
+        wandb.log({
+            "trajectory/local_loss_mean": np.mean(local_loss_list),
+            "trajectory/local_loss_std": np.std(local_loss_list),
+            "trajectory/server_loss_mean": np.mean(server_loss_list),
+            "trajectory/server_loss_std": np.std(server_loss_list),
+            "trajectory/global_loss_mean": np.mean(global_loss_list),
+            "trajectory/global_loss_std": np.std(global_loss_list),
+            "epoch": self.current_round
+        }, step=self.current_round)
         
         if self.current_round % self.agent.TARGET_UPDATE == 0:
             self.agent.update_target_net()
