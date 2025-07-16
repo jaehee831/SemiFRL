@@ -34,7 +34,7 @@ def main():
     process_control()
     seeds = list(range(cfg['init_seed'], cfg['init_seed'] + cfg['num_experiments']))
     
-    prefix = "w_kld_20"
+    prefix = "kld_prob"
     
     for i in range(cfg['num_experiments']):
         model_tag_list = [str(seeds[i]), cfg['data_name'], cfg['model_name'], cfg['control_name']]
@@ -223,29 +223,17 @@ def train_client(batchnorm_dataset, server_dataset_train, client_dataset, server
     if epoch > 200:
         kld_list = get_kld_all_clients()
         kld_np = np.array(kld_list)
-        # 상위 20% 인덱스 구하기
-        num_exclude = max(1, int(cfg['num_clients'] * 0.2))
-        exclude_indices = kld_np.argsort()[-num_exclude:]
-        # 선택 가능한 클라이언트 pool
-        candidate_indices = np.setdiff1d(np.arange(cfg['num_clients']), exclude_indices)
-        # 랜덤 선택
-        if len(candidate_indices) < num_active_clients:
-            selected_clients = candidate_indices.tolist()
-        else:
-            selected_clients = np.random.choice(candidate_indices, num_active_clients, replace=False).tolist()
-        # wandb 로깅
-        try:
-            selected_klds = kld_np[selected_clients]
-            excluded_klds = kld_np[exclude_indices]
-            wandb.log({
-                "selected_clients/kld_mean": float(np.mean(selected_klds)),
-                "selected_clients/kld_std": float(np.std(selected_klds)),
-                "excluded_clients/kld_mean": float(np.mean(excluded_klds)),
-                "excluded_clients/kld_std": float(np.std(excluded_klds)),
-                "epoch": epoch
-            }, step=epoch)
-        except ImportError:
-            pass
+        
+        # 완전 제외 대신 가중치 기반 선택
+        weights = 1.0 / (np.sqrt(kld_np + 1e-8))  # KLD가 높을수록 낮은 가중치
+        weights = weights / np.sum(weights)
+        
+        selected_clients = np.random.choice(
+            cfg['num_clients'], 
+            num_active_clients, 
+            replace=False, 
+            p=weights
+        ).tolist()
     else:
         # 초기 200라운드는 전체에서 랜덤 선택
         selected_clients = np.random.choice(cfg['num_clients'], num_active_clients, replace=False).tolist()
@@ -300,11 +288,15 @@ def train_client(batchnorm_dataset, server_dataset_train, client_dataset, server
     logger.safe(False)
     return
 
-
 def train_server(dataset, server, optimizer, metric, logger, epoch):
     logger.safe(True)
     start_time = time.time()
     lr = optimizer.param_groups[0]['lr']
+    if epoch == 1 and 'warmup' in cfg['model_tag']:
+        #warm up
+        server.server_epoch = 100
+    else:
+        server.server_epoch = cfg['server']['num_epochs']
     server.train(dataset, lr, metric, logger)
     _time = (time.time() - start_time)
     epoch_finished_time = datetime.timedelta(seconds=round((cfg['global']['num_epochs'] - epoch) * _time))
@@ -316,7 +308,6 @@ def train_server(dataset, server, optimizer, metric, logger, epoch):
     print(logger.write('train', metric.metric_name['train']))
     logger.safe(False)
     return
-
 
 def test(data_loader, model, metric, logger, epoch):
     logger.reset()
