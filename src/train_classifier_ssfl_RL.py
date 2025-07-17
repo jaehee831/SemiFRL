@@ -33,7 +33,7 @@ def main():
     process_control()
     seeds = list(range(cfg['init_seed'], cfg['init_seed'] + cfg['num_experiments']))
     
-    prefix = "cxp2"  # Prefix for experiment tags
+    prefix = "cxp6"  # Prefix for experiment tags
     
     for i in range(cfg['num_experiments']):
         model_tag_list = [str(seeds[i]), cfg['data_name'], cfg['model_name'], cfg['control_name']]
@@ -149,6 +149,8 @@ def runExperiment():
             # 추가
         }, step=epoch)
 
+        sqlite_insert_test_data(cfg['server_db_path'], epoch, test_eval, server_eval, server_eval_ft)
+        
         # 현재 라운드의 클라이언트 정보 가져오기
         now_client_info = [get_client_recent_info(cfg['client_db_path'], cid) for cid in server.agent.selected_client_id_list]
         client_loss_now = [info['local_loss'] for info in now_client_info]
@@ -169,10 +171,8 @@ def runExperiment():
             client_loss_now=client_loss_now,
             server_loss_now=server_loss_now,
             next_state=next_state,
-            done=is_last_round
+            done=is_last_round,
         )
-        
-        sqlite_insert_test_data(cfg['server_db_path'],epoch,test_eval,server_eval,server_eval_ft)
         
         result = {'cfg': cfg, 'epoch': epoch + 1, 'server': server, 'client': client,
                   'optimizer_state_dict': optimizer.state_dict(),

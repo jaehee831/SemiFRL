@@ -28,7 +28,8 @@ def create_train_database(db_name):
             server_loss REAL,
             server_acc REAL,
             server_labels TEXT,
-            server_output_logit TEXT)
+            server_output_logit TEXT,
+            fix_dataset INTEGER)
         ''')
     conn.commit()
     conn.close()
@@ -94,18 +95,18 @@ def sqlite_insert_test_data(db_name,_round,test_evaluation,server_eval,server_ev
     conn.commit()
     conn.close()
 
-def get_global_model_result(db_name, _round):
+def get_global_model_result(db_name, _round): # 변경
     conn = sqlite3.connect(db_name, timeout=5)
     cursor = conn.cursor()
     cursor.execute(
         '''
-        SELECT agg_ft_server_loss, agg_ft_server_acc FROM fed_rl_data WHERE round = ?
+        SELECT agg_server_loss, agg_server_acc FROM fed_rl_data WHERE round = ?
         ''', (_round,)
     )
     result = cursor.fetchone()
     conn.close()
     if result:
-        return {'agg_ft_server_loss': result[0], 'agg_ft_server_acc': result[1]}
+        return {'agg_server_loss': result[0], 'agg_server_acc': result[1]}
     return None
     
 def get_client_recent_info(client_db_path,client_number):

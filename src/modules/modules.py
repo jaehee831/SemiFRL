@@ -313,6 +313,7 @@ class Client:
                     fix_dataset.data = list(compress(fix_dataset.data, mask))
                     fix_dataset.target = list(compress(fix_dataset.target, mask))
                     fix_dataset.other = {'id': list(range(len(fix_dataset.data)))}
+                    self.db_data['fix_dataset'] = len(fix_dataset.data)
                     if 'mix' in cfg['loss_mode']:
                         mix_dataset = copy.deepcopy(dataset)
                         mix_dataset.target = new_target.tolist()
@@ -321,6 +322,7 @@ class Client:
                         mix_dataset = None
                     return fix_dataset, mix_dataset
                 else:
+                    self.db_data['fix_dataset'] = 0
                     return None
         else:
             raise ValueError('Not valid client loss mode')
@@ -516,7 +518,9 @@ class Client:
                  server_evaluation['Loss'],
                  server_evaluation['Accuracy'],
                  server_evaluation['labels'],
-                 server_evaluation['output_logit'])
+                 server_evaluation['output_logit'],
+                 self.db_data.get('fix_dataset', 0) 
+        )
         conn = sqlite3.connect(db_name, timeout=5)
         cursor = conn.cursor()
         cursor.execute('''
@@ -535,8 +539,9 @@ class Client:
                                      server_loss,
                                      server_acc,
                                      server_labels,
-                                     server_output_logit)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     server_output_logit,
+                                     fix_dataset)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', data)
         conn.commit()
         conn.close()
@@ -697,32 +702,40 @@ class RLAgent:
         # print(f"[RLAgent][ReplayBuffer] 현재 버퍼 크기: {len(self.agent.memory)}/{self.BATCH_SIZE}")
         rewards = []
         local_loss_list = []
+        local_loss_per_sample_list = []
         server_loss_list = []
         global_loss_list = []
         
-        from db import get_global_model_result
+        from db import get_global_model_result, get_client_recent_info
         
         # 현재 라운드 글로벌 모델 정보 가져오기
         current_result = get_global_model_result(cfg['server_db_path'], self.current_round)
         current_global_loss = 0.0
         if current_result:
-            current_global_loss = current_result['agg_ft_server_loss']
+            current_global_loss = current_result['agg_server_loss']
         
         if client_loss_now and server_loss_now:
             for i, cid in enumerate(client_ids):
                 local_loss = client_loss_now[i] if i < len(client_loss_now) else 0.0
-                # fix_size = fix_dataset_sizes[i] if i < len(fix_dataset_sizes) and fix_dataset_sizes[i] > 0 else 1.0
-                # local_loss_per_sample = local_loss / fix_size
-
                 server_loss = server_loss_now[i] if i < len(server_loss_now) else 0.0
                 global_loss = current_global_loss
+                
+                # fix_dataset 사이즈 가져오기
+                client_info = get_client_recent_info(cfg['client_db_path'], cid)
+                fix_dataset_size = client_info.get('fix_dataset', 1)
+                if fix_dataset_size <= 0:
+                    fix_dataset_size = 1  # 0으로 나누는 것 방지
 
+                local_loss_per_sample = local_loss / fix_dataset_size
                 local_loss_list.append(local_loss)
+                local_loss_per_sample_list.append(local_loss_per_sample)
                 server_loss_list.append(server_loss)
                 global_loss_list.append(global_loss)
                 
-                reward = -(local_loss + server_loss + global_loss)
+                reward = -(local_loss_per_sample + server_loss + global_loss)
                 rewards.append(reward)
+                
+                print("current_global_loss:", current_global_loss)                
         else:
             rewards = [0.0] * len(client_ids)
 
@@ -734,6 +747,8 @@ class RLAgent:
             loss = self.agent.learn()
                           
         wandb.log({
+            "trajectory/local_loss_per_sample_mean": np.mean(local_loss_per_sample_list),
+            "trajectory/local_loss_per_sample_std": np.std(local_loss_per_sample_list),
             "trajectory/local_loss_mean": np.mean(local_loss_list),
             "trajectory/local_loss_std": np.std(local_loss_list),
             "trajectory/server_loss_mean": np.mean(server_loss_list),
