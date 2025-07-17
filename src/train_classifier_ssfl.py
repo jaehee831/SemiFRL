@@ -7,6 +7,7 @@ import time
 import torch
 import torch.backends.cudnn as cudnn
 import numpy as np
+import wandb
 from config import cfg, process_args
 from data import fetch_dataset, split_dataset, make_data_loader, separate_dataset, separate_dataset_su, \
     make_batchnorm_dataset_su, make_batchnorm_stats
@@ -34,8 +35,8 @@ def main():
     for i in range(cfg['num_experiments']):
         model_tag_list = [str(seeds[i]), cfg['data_name'], cfg['model_name'], cfg['control_name']]
         cfg['model_tag'] = '_'.join([x for x in model_tag_list if x])
-        cfg['client_db_path'] = f"DB/exp5_{cfg['model_tag']}_client.db"
-        cfg['server_db_path'] = f"DB/exp5_{cfg['model_tag']}_server.db"
+        cfg['client_db_path'] = f"DB/semifl/{cfg['model_tag']}_client.db"
+        cfg['server_db_path'] = f"DB/semifl/{cfg['model_tag']}_server.db"
         create_train_database(db_name=cfg['client_db_path'])
         create_test_database(db_name=cfg['server_db_path'])
         print('Experiment: {}'.format(cfg['model_tag']))
@@ -49,6 +50,15 @@ def runExperiment():
     cfg['seed'] = int(cfg['model_tag'].split('_')[0])
     torch.manual_seed(cfg['seed'])
     torch.cuda.manual_seed(cfg['seed'])
+    
+    # Initialize wandb
+    wandb.init(
+        project="SSFRL",
+        name=cfg['model_tag'],
+        config=cfg,
+        reinit=True
+    )
+    
     server_dataset = fetch_dataset(cfg['data_name'])
     client_dataset = fetch_dataset(cfg['data_name'])
     process_dataset(server_dataset)
@@ -118,6 +128,55 @@ def runExperiment():
         data_loader_server_train = make_data_loader({'train': server_dataset['train']}, 'server')['train']
         server_eval_ft = test(data_loader_server_train, test_model, metric, logger, epoch)
         
+        # wandb 로깅
+        wandb_log = {
+            "epoch": epoch,
+            # "learning_rate": optimizer.param_groups[0]['lr'],
+            "test/loss": test_eval.get('Loss', 0),
+            "test/accuracy": test_eval.get('Accuracy', 0),
+            # "server_eval/accuracy": server_eval.get('Accuracy', 0),
+            # "server_eval/loss": server_eval.get('Loss', 0),
+            "server/loss": server_eval_ft.get('Loss', 0),
+            "server/accuracy": server_eval_ft.get('Accuracy', 0),
+        }
+        
+        # 클라이언트 통계 로깅
+        active_clients = [c for c in client if c.active]
+        if active_clients:
+            client_losses = [c.db_data.get('loss', 0) for c in active_clients if c.db_data.get('loss', -1) != -1]
+            client_msps = [c.db_data.get('msp', 0) for c in active_clients if c.db_data.get('msp', -1) != -1]
+            client_label_ratios = [c.db_data.get('label_ratio', 0) for c in active_clients if c.db_data.get('label_ratio', -1) != -1]
+            
+            if client_losses:
+                wandb_log.update({
+                    "client/loss_mean": np.mean(client_losses),
+                    "client/loss_std": np.std(client_losses),
+                    "client/active_count": len(active_clients)
+                })
+            
+            if client_msps:
+                wandb_log.update({
+                    "client/msp_mean": np.mean(client_msps),
+                    "client/msp_std": np.std(client_msps)
+                })
+            
+            if client_label_ratios:
+                wandb_log.update({
+                    "client/label_ratio_mean": np.mean(client_label_ratios),
+                    "client/label_ratio_std": np.std(client_label_ratios)
+                })
+        
+        # 참여 빈도 통계
+        participation_freqs = list(cfg['participant_frequency'].values())
+        wandb_log.update({
+            "participation/frequency_mean": np.mean(participation_freqs),
+            "participation/frequency_std": np.std(participation_freqs),
+            "participation/frequency_max": np.max(participation_freqs),
+            "participation/frequency_min": np.min(participation_freqs)
+        })
+        
+        wandb.log(wandb_log, step=epoch)
+        
         # 테스트 결과 DB에 저장
         sqlite_insert_test_data(cfg['server_db_path'], epoch, test_eval, server_eval, server_eval_ft)
         
@@ -133,6 +192,8 @@ def runExperiment():
             metric.update(logger.mean['test/{}'.format(metric.pivot_name)])
             shutil.copy('./output/model/{}_checkpoint.pt'.format(cfg['model_tag']),
                         './output/model/{}_best.pt'.format(cfg['model_tag']))
+            # wandb에 best model 기록
+            wandb.log({"best_test_accuracy": test_eval.get('Accuracy', 0)}, step=epoch)
         logger.reset()
         
         # 마지막 라운드에서 메트릭 플로팅
@@ -168,8 +229,12 @@ def runExperiment():
                 'train/Loss',
                 os.path.join(result_dir, 'train_loss.png')
             )
+
             
             print(f"\n메트릭 그래프가 저장되었습니다: {result_dir}")
+    
+    # 실험 종료
+    wandb.finish()
     return
 
 
